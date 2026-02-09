@@ -1,0 +1,299 @@
+const express = require('express');
+const router = express.Router();
+
+// Doctor management API routes
+module.exports = (db) => {
+
+  // 1. GET ALL DOCTORS
+  router.get('/', async (req, res) => {
+    try {
+      const { specialty, available } = req.query;
+
+      let query = `
+        SELECT
+          d.id, d.full_name as name, u.email, u.phone, d.specialization as specialty,
+          d.qualification, d.experience_years, d.rating, d.consultation_fee,
+          d.bio as about, d.profile_image_url as profile_image,
+          CASE WHEN d.availability_status = 'available' THEN true ELSE false END as is_available,
+          u.created_at
+        FROM doctors d
+        JOIN users u ON d.user_id = u.id
+        WHERE u.is_active = true AND u.role = 'doctor'
+      `;
+      const params = [];
+      let paramCount = 0;
+
+      if (specialty) {
+        paramCount++;
+        query += ` AND d.specialization = $${paramCount}`;
+        params.push(specialty);
+      }
+
+      if (available !== undefined) {
+        paramCount++;
+        query += ` AND d.availability_status = $${paramCount}`;
+        params.push(available === 'true' ? 'available' : 'busy');
+      }
+
+      query += ' ORDER BY d.rating DESC, d.experience_years DESC';
+
+      const result = await db.query(query, params);
+      const doctors = result.rows;
+
+      res.json({
+        doctors: doctors.map(doctor => ({
+          id: doctor.id,
+          name: doctor.name,
+          email: doctor.email,
+          phone: doctor.phone,
+          specialty: doctor.specialty,
+          qualification: doctor.qualification,
+          experienceYears: doctor.experience_years,
+          rating: parseFloat(doctor.rating),
+          consultationFee: parseFloat(doctor.consultation_fee),
+          about: doctor.about,
+          profileImage: doctor.profile_image,
+          isAvailable: doctor.is_available,
+          createdAt: doctor.created_at
+        }))
+      });
+
+    } catch (error) {
+      console.error('Get doctors error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // 2. GET DOCTOR SPECIALTIES
+  router.get('/specialties/list', async (req, res) => {
+    try {
+      const result = await db.query(
+        'SELECT DISTINCT specialization FROM doctors WHERE availability_status = \'available\' ORDER BY specialization'
+      );
+
+      res.json({
+        specialties: result.rows.map(row => row.specialization)
+      });
+
+    } catch (error) {
+      console.error('Get specialties error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // 3. SEARCH DOCTORS (Must come before /:id to avoid matching "search" as an ID)
+  router.get('/search/:query', async (req, res) => {
+    try {
+      const { query } = req.params;
+      const searchTerm = `%${query}%`;
+
+      const result = await db.query(
+        `SELECT
+          d.id, d.full_name as name, u.email, u.phone, d.specialization as specialty,
+          d.qualification, d.experience_years, d.rating, d.consultation_fee,
+          d.bio as about, d.profile_image_url as profile_image,
+          CASE WHEN d.availability_status = 'available' THEN true ELSE false END as is_available,
+          u.created_at
+         FROM doctors d
+         JOIN users u ON d.user_id = u.id
+         WHERE (d.full_name ILIKE $1 OR d.specialization ILIKE $2 OR d.qualification ILIKE $3)
+         AND u.is_active = true AND u.role = 'doctor'
+         ORDER BY d.rating DESC, d.experience_years DESC`,
+        [searchTerm, searchTerm, searchTerm]
+      );
+      const doctors = result.rows;
+
+      res.json({
+        doctors: doctors.map(doctor => ({
+          id: doctor.id,
+          name: doctor.name,
+          email: doctor.email,
+          phone: doctor.phone,
+          specialty: doctor.specialty,
+          qualification: doctor.qualification,
+          experienceYears: doctor.experience_years,
+          rating: parseFloat(doctor.rating),
+          consultationFee: parseFloat(doctor.consultation_fee),
+          about: doctor.about,
+          profileImage: doctor.profile_image,
+          isAvailable: doctor.is_available,
+          createdAt: doctor.created_at
+        })),
+        searchQuery: query
+      });
+
+    } catch (error) {
+      console.error('Search doctors error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // 4. GET DOCTOR BY ID (Must come after /search/:query and /specialties/list)
+  router.get('/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const result = await db.query(
+        `SELECT
+          d.id, d.full_name as name, u.email, u.phone, d.specialization as specialty,
+          d.qualification, d.experience_years, d.rating, d.consultation_fee,
+          d.bio as about, d.profile_image_url as profile_image,
+          CASE WHEN d.availability_status = 'available' THEN true ELSE false END as is_available,
+          u.created_at
+         FROM doctors d
+         JOIN users u ON d.user_id = u.id
+         WHERE d.id = $1 AND u.is_active = true`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Doctor not found' });
+      }
+
+      const doctor = result.rows[0];
+
+      // Get doctor availability
+      const availabilityResult = await db.query(
+        'SELECT day_of_week, start_time, end_time, is_active FROM doctor_availability WHERE doctor_id = $1',
+        [id]
+      );
+      const availability = availabilityResult.rows;
+
+      res.json({
+        doctor: {
+          id: doctor.id,
+          name: doctor.name,
+          email: doctor.email,
+          phone: doctor.phone,
+          specialty: doctor.specialty,
+          qualification: doctor.qualification,
+          experienceYears: doctor.experience_years,
+          rating: parseFloat(doctor.rating),
+          consultationFee: parseFloat(doctor.consultation_fee),
+          about: doctor.about,
+          profileImage: doctor.profile_image,
+          isAvailable: doctor.is_available,
+          createdAt: doctor.created_at,
+          availability: availability.map(slot => ({
+            dayOfWeek: slot.day_of_week,
+            startTime: slot.start_time,
+            endTime: slot.end_time,
+            isAvailable: slot.is_active
+          }))
+        }
+      });
+
+    } catch (error) {
+      console.error('Get doctor error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // 5. GET DOCTOR AVAILABILITY FOR SPECIFIC DATE
+  router.get('/:id/availability/:date', async (req, res) => {
+    try {
+      const { id, date } = req.params;
+
+      // Get day of week for the given date
+      const dateObj = new Date(date);
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayOfWeek = dayNames[dateObj.getDay()];
+
+      // Get doctor's availability for that day
+      const availabilityResult = await db.query(
+        'SELECT start_time, end_time, is_active FROM doctor_availability WHERE doctor_id = $1 AND day_of_week = $2',
+        [id, dayOfWeek]
+      );
+      const availability = availabilityResult.rows;
+
+      if (availability.length === 0 || !availability[0].is_active) {
+        return res.json({
+          available: false,
+          timeSlots: []
+        });
+      }
+
+      // Get existing appointments for that date
+      const appointmentResult = await db.query(
+        'SELECT appointment_time FROM appointments WHERE doctor_id = $1 AND appointment_date = $2 AND status IN (\'scheduled\', \'confirmed\', \'in_progress\')',
+        [id, date]
+      );
+      const appointments = appointmentResult.rows;
+
+      const bookedTimes = appointments.map(apt => apt.appointment_time);
+
+      // Generate time slots (30-minute intervals)
+      const startTime = availability[0].start_time;
+      const endTime = availability[0].end_time;
+      const timeSlots = [];
+
+      const start = new Date(`2000-01-01 ${startTime}`);
+      const end = new Date(`2000-01-01 ${endTime}`);
+
+      while (start < end) {
+        const timeString = start.toTimeString().slice(0, 5);
+        const isBooked = bookedTimes.some(bookedTime => bookedTime === timeString + ':00');
+
+        timeSlots.push({
+          time: timeString,
+          available: !isBooked
+        });
+
+        start.setMinutes(start.getMinutes() + 30);
+      }
+
+      res.json({
+        available: true,
+        date: date,
+        dayOfWeek: dayOfWeek,
+        timeSlots: timeSlots
+      });
+
+    } catch (error) {
+      console.error('Get availability error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // 6. GET DOCTOR'S PATIENTS (New endpoint for doctor side)
+  router.get('/:doctorId/patients', async (req, res) => {
+    try {
+      const { doctorId } = req.params;
+
+      const result = await db.query(
+        `SELECT DISTINCT
+          u.id as patient_id,
+          u.full_name as patient_name,
+          u.email,
+          u.phone,
+          u.profile_image_url as profile_image,
+          COUNT(DISTINCT a.id) as total_appointments,
+          MAX(a.appointment_date) as last_visit
+         FROM appointments a
+         JOIN users u ON a.patient_id = u.id
+         WHERE a.doctor_id = $1 AND a.status IN ('confirmed', 'completed')
+         GROUP BY u.id, u.full_name, u.email, u.phone, u.profile_image_url
+         ORDER BY MAX(a.appointment_date) DESC`,
+        [doctorId]
+      );
+
+      res.json({
+        patients: result.rows.map(patient => ({
+          id: patient.patient_id,
+          name: patient.patient_name,
+          email: patient.email,
+          phone: patient.phone,
+          profileImage: patient.profile_image,
+          totalAppointments: parseInt(patient.total_appointments),
+          lastVisit: patient.last_visit
+        }))
+      });
+
+    } catch (error) {
+      console.error('Get doctor patients error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  return router;
+};
