@@ -1,0 +1,40 @@
+# RayScan ML Model - Kidney Stone Detection
+# Requirements for training and deploying the model
+
+# Core ML Libraries
+tensorflow==2.15.0
+keras==2.15.0
+numpy==1.24.3
+pandas==2.0.3
+scikit-learn==1.3.2
+
+# XGBoost for hybrid classifier
+xgboost==2.0.3
+
+# Image Processing
+opencv-python==4.8.1.78
+Pillow==10.1.0
+
+# Data Augmentation
+albumentations==1.3.1
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# Model Explainability
+tf-keras-vis==0.8.7
+
+# Model Export
+tensorflow-lite==2.15.0
+
+# Jupyter Notebooks
+jupyter==1.0.0
+ipykernel==6.27.1
+
+# Utilities
+tqdm==4.66.1
+python-dotenv==1.0.0
+
+# Kaggle API for dataset download
+kaggle==1.6.12

@@ -1,0 +1,3 @@
+# Placeholder for ML models
+# After training, copy kidney_stone.tflite here
+# Run: python ml_model/src/export.py to generate the TFLite model
